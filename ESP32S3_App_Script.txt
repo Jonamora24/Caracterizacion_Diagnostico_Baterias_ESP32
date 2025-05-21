@@ -1,0 +1,76 @@
+/**
+ * doGet(e)
+ *
+ * Función que recibe peticiones HTTP GET desde Arduino (u otra fuente)
+ * y almacena los parámetros recibidos en una hoja de cálculo de Google Sheets,
+ * respetando un intervalo mínimo de 20 segundos entre registros y un límite
+ * máximo de filas para evitar sobrecarga.
+ *
+ * @param {Object} e - Objeto de evento que contiene los parámetros de la petición.
+ *                     Normalmente Apps Script lo inyecta cuando se despliega
+ *                     como Web App. Si se ejecuta desde el editor, e puede ser undefined.
+ * @param {Object.<string,string>} e.parameter - Mapa de parámetros enviados por query string:
+ *     - capacidad: (string) Capacidad medida de la batería (Ah)
+ *     - voltaje: (string) Voltaje medido (V)
+ *     - corriente: (string) Corriente medida (A)
+ *     - temperatura: (string) Temperatura medida
+ *     - SOC: (string) State of Charge (porcentaje)
+ *     - SOH: (string) State of Health (porcentaje)
+ *     - RUL: (string) Remaining Useful Life (horas)
+ *
+ * @returns {ContentService.TextOutput} Mensaje de éxito o error al cliente HTTP.
+ */
+function doGet(e) {
+  // --- CONFIGURACIÓN INICIAL ---
+  // ID del Spreadsheet donde se almacenan los datos (hoja de calculo de google (Excel))
+  var SPREADSHEET_ID = "1Mz5RmgljFGnuVXwIsLqOvqToeDZk4auwsB5QzuAK8hg"; //se anexa el URL de la hoja de calculo
+  var libro        = SpreadsheetApp.openById(SPREADSHEET_ID); //activa el libro de excel
+  var hoja1        = libro.getActiveSheet(); //activa la hoja de excel
+  var MAX_FILAS    = 1001;         // número máximo de filas permitidas (incluye cabecera)
+  var INTERVALO_MS = 20 * 1000;    // intervalo mínimo entre entradas: 20 s en milisegundos
+  var ahora        = new Date();   // timestamp actual
+
+  // --- VERIFICACIÓN DE INTERVALO ---
+  // Obtiene la última fila con datos para comparar timestamps
+  var ultimaFila = hoja1.getLastRow();
+  if (ultimaFila > 1) {  // asumimos fila 1 = cabecera
+    var fechaUltima = hoja1.getRange(ultimaFila, 1).getValue();               // columna A = fecha
+    var deltaTiempo = ahora.getTime() - new Date(fechaUltima).getTime();      // diferencia en ms
+
+    // Si no han pasado 20 s desde el último registro, se aborta
+    if (deltaTiempo < INTERVALO_MS) {
+      return ContentService
+        .createTextOutput("Espera un poco más antes de enviar datos de nuevo.")
+        .setMimeType(ContentService.MimeType.TEXT);
+    }
+  }
+
+  // --- VERIFICACIÓN DE LÍMITE DE FILAS ---
+  if (ultimaFila >= MAX_FILAS) {
+    return ContentService
+      .createTextOutput("Error: Se alcanzó el límite máximo de filas (" + MAX_FILAS + "). No se guardaron datos.")
+      .setMimeType(ContentService.MimeType.TEXT);
+  }
+
+  // --- LECTURA SEGURA DE PARÁMETROS ---
+  // Si e o e.parameter es undefined, usamos un objeto vacío {} para no fallar
+  var params    = (e && e.parameter) || {};
+  var capacidad   = params.capacidad   || "Sin datos";
+  var voltaje     = params.voltaje     || "Sin datos";
+  var corriente   = params.corriente   || "Sin datos";
+  var temperatura = params.temperatura || "Sin datos";
+  var SOC         = params.SOC         || "Sin datos";
+  var SOH         = params.SOH         || "Sin datos";
+  var RUL         = params.RUL         || "Sin datos";
+
+  // --- ESCRITURA EN LA HOJA ---
+  // Preparamos una fila con [Fecha, Capacidad, Voltaje, Corriente, Temperatura, SOC, SOH, RUL]
+  var nuevaFila = [ahora, capacidad, voltaje, corriente, temperatura, SOC, SOH, RUL];
+  hoja1.getRange(ultimaFila + 1, 1, 1, nuevaFila.length).setValues([nuevaFila]);
+
+  // --- RESPUESTA AL CLIENTE ---
+  return ContentService
+    .createTextOutput("Datos guardados correctamente: " + ahora)
+    .setMimeType(ContentService.MimeType.TEXT);
+}
+
